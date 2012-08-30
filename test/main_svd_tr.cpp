@@ -1,13 +1,12 @@
 /* run_svd_tr.cpp */
+#include "mpi_svd_tr.hpp"
+
 #include <douban/mpi.hpp>
 #include <douban/matvec.hpp>
 #include <douban/option_parser.hpp>
 #include <douban/linalg/gemv_ax.hpp>
 #include <douban/matvec/mat_container.hpp>
 #include <douban/matvec/vec_kahan_gemv.hpp>
-//#include <douban/linalg/svd_tr.hpp>
-//#include <douban/mpi/linalg/mpi_svd_tr.hpp>
-#include </home/wuhong_intern/svd/include/mpi_svd_tr.hpp>
 #include <douban/mpi/graph_load.hpp>
 #include <douban/utility/string.hpp>
 #include <douban/clog_utility.hpp>
@@ -119,6 +118,9 @@ int main(int argc, char *argv[]) {
       Ai.resize(ai.size());
       Ap.resize(lm + 1);
       CLOG_S(INFO, "A ...");
+      std::cout << "lmlmlmlm" << lm << std::endl;
+      std::cout << "nnnnnnnn" << n << std::endl;
+      std::cout << "aiaiai.size" << ai.size() << std::endl;
       douban::coo_to_csr(lm, n, ai.size(), av, ai, aj, Av, Ap, Ai);
       CLOG_T(INFO, "done");
     }
@@ -149,6 +151,9 @@ int main(int argc, char *argv[]) {
       Ati.resize(ati.size());
       Atp.resize(ln + 1);
       CLOG_S(INFO, "At ...");
+      std::cout << "lnlnlnln" << ln << std::endl;
+      std::cout << "mmmmmmmm" << m << std::endl;
+      std::cout << "atiati.size" << ati.size() << std::endl;
       douban::coo_to_csr(ln, m, ati.size(), atv, ati, atj, Atv, Atp, Ati);
       CLOG_T(INFO, "done");
     }
@@ -160,20 +165,18 @@ int main(int argc, char *argv[]) {
   VCLOG(1, "Av.sum=", std::accumulate(Av.begin(), Av.end(), 0.));
   VCLOG(1, "Atv.sum=", std::accumulate(Atv.begin(), Atv.end(), 0.));
 
-  douban::mat_container<double> U(lm, k);
-  douban::mat_container<double> V(ln, k);
+  douban::mat_container<double> U(m, k);
+  douban::mat_container<double> V(n, k);
   douban::vec_container<double> S(k);
 
   CLOG_S(INFO, "svd_tr ...");
-  
-  //std::cout << "llo" << row_step << std::endl;
-  //std::cout << "llcolo" << col_step << std::endl;
-  
-  //douban::linalg::svd_tr(A, U, S, V, p, 1.e-7, display);
   douban::linalg::svd_tr(A, At, U, S, V, p, 1.e-7, display, rank * row_step, rank * col_step);
   CLOG_T(INFO, "done svd_tr");
 
-  if (out_u.size()) {
+  for(size_t kk = 0; kk < k; ++kk)
+    std::cout << "S(i) is " << S.get(kk) << std::endl;
+
+  if (comm.rank() == 0 && out_u.size()) {
     out_u = douban::str_replace(out_u, "%{rank}", rank);
     std::ofstream ofs(out_u);
     size_t row_start = rank * row_step;
@@ -183,7 +186,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (out_v.size()) {
+  if (comm.rank() == 0 && out_v.size()) {
     out_v = douban::str_replace(out_v, "%{rank}", rank);
     std::ofstream ofs(out_v);
     size_t col_start = rank * col_step;
@@ -193,7 +196,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (out_s.size()) {
+  if (comm.rank() == 0 && out_s.size()) {
     std::ofstream ofs(out_s);
     douban::text_output(*ofs.rdbuf(), S);
     ofs.rdbuf()->sputc('\n');
