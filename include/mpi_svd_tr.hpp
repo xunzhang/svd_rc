@@ -1,7 +1,7 @@
 /**
  * @file   svd_tr.hpp
- * @author Changsheng Jiang <jiangzuoyan@gmail.com>
- * @date   Mon Feb 27 12:00:18 2012
+ * @author wuhong<xunzhangthu@gmail.com>
+ * @date   Mon Aug 30 12:00:18 2012
  *
  * @brief mpi version of thick restart svd method
  *
