@@ -1,9 +1,7 @@
 /**
- * @author Changsheng Jiang <jiangzuoyan@gmail.com>
- * @date   Thu Oct 27 15:29:05 2011
- *
+ * @file mpi_bidiag.hpp
+ * @author wu hong<xunzhangthu@gmail.com>
  * @brief mpi version of bidiagonalization, One-Sided Lanczos Bidiag. (restarted, with enhancements)
- *
  *
  */
 

@@ -1,10 +1,8 @@
 /**
- * @file   svd_tr.hpp
- * @author Changsheng Jiang <jiangzuoyan@gmail.com>
- * @date   Mon Feb 27 12:00:18 2012
+ * @file   mpi_svd_tr.hpp
+ * @author wu hong <jiangzuoyan@gmail.com>
  *
  * @brief mpi version of thick restart svd method
- *
  *
  */
 #ifndef FILE_5381048f_3032_49de_9166_64d32706b8ea_H
