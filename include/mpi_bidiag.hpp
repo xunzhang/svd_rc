@@ -1,6 +1,6 @@
 /**
- * @author wuhong<xunzhangthu@gmail.com>
- * @date   Thu Oct 30 21:05:05 2011
+ * @author Changsheng Jiang <jiangzuoyan@gmail.com>
+ * @date   Thu Oct 27 15:29:05 2011
  *
  * @brief mpi version of bidiagonalization, One-Sided Lanczos Bidiag. (restarted, with enhancements)
  *
@@ -19,11 +19,11 @@
 #include <sys/time.h>
 
 static double currenttime(void) {
-	double timestamp;
-	struct timeval tv;
-	gettimeofday(&tv, 0);
-	timestamp = (double)((double)(tv.tv_sec*1e6) + (double)tv.tv_usec);
-	return timestamp;
+  double timestamp;
+  struct timeval tv;
+  gettimeofday(&tv, 0);
+  timestamp = (double)((double)(tv.tv_sec*1e6) + (double)tv.tv_usec);
+  return timestamp;
 }
 
 namespace douban {
@@ -155,6 +155,8 @@ void bidiag_gkl_restart(
 
   // enhancements version from SLEPc
   const double eta = 1.e-10;
+  
+  double q_s = 0.0, q_e = 0.0;
 
   double t_start = 0.0, t_end = 0.0;
   double local_start = 0.0, local_end = 0.0;
@@ -165,24 +167,21 @@ void bidiag_gkl_restart(
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
   // Step 1
-  std::cout << "nprocs is " << nprocs << std::endl;
   int recv_len = (int)P.dim0() * nprocs;
   vec_container<double> tmp(Ax.dim0());
   vec_container<double> recv_tmp(recv_len);
-
-  std::cout << "recv" << recv_len << std::endl;
-
+  
   auto m_Ax = make_gemv_ax(&Ax);
   auto m_Atx = make_gemv_ax(&Atx);
-
+  
   m_Ax(Q.col(l), tmp, P.dim0() > 1000);
-
+  
   vec_container<double> send_data(P.dim0(),0);
   for(size_t i = s_indx; i < s_indx + Ax.dim0(); ++i)
     send_data[i] = tmp[i-s_indx];
-
+  
   MPI_Gather(&(send_data[0]), P.dim0(), MPI_DOUBLE, &(recv_tmp[0]), P.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
+  
   P.col(l) = 0;
   // Generate truly P.col(l)
   if(rank == 0) {
@@ -193,7 +192,6 @@ void bidiag_gkl_restart(
     }
   }
 
-
   MPI_Bcast(&(P.col(0)[0]), P.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
   //MPI_Bcast(&(P.col(l)[0]), P.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
@@ -201,7 +199,11 @@ void bidiag_gkl_restart(
   vec_container<double> T(n);
   int recv_l = Q.dim0() * nprocs;
   vec_container<double> recv_t(recv_l);
+  //q_s = currenttime();
+  std::cout << "l is " << l << "n is " << n << std::endl;
   for (int j = l; j < n; ++j) {
+    q_s = currenttime();
+    std::cout << "main loop" << std::endl;
     // Step 3
     vec_container<double> tmp2(Atx.dim0());
 
@@ -209,7 +211,6 @@ void bidiag_gkl_restart(
     if(rank == 0)
     	t_start = currenttime();
 
-    std::cout << "rankrank is " << rank << std::endl;
     local_start = currenttime();
     m_Atx(P.col(j), tmp2, Q.dim0() > 1000);
     local_end = currenttime();
@@ -234,10 +235,15 @@ void bidiag_gkl_restart(
     }
 
     // Step 4
-    for(size_t aa = 0; aa < Q.dim0(); ++aa) // row
-      MPI_Bcast(&(Q.row(aa)[0]), j + 2, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    // MPI_Bcast(&(Q.col(0)[0]), Q.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
+    { // begin of local scope
+    //for(size_t aa = 0; aa < Q.dim0(); ++aa) // row
+    //  MPI_Bcast(&(Q.row(aa)[0]), j + 2, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    vec_container<double> cast_data(Q.dim0() * (j + 2));
+    for(size_t bc = 0; bc < Q.dim0() * (j + 2); ++bc) {
+      cast_data[]
+    }
+    } // end of local scope
+    
     if(rank == 0)
       t_end = currenttime();
     auto Qj = mat_cols(Q, 0, j + 1);
@@ -285,8 +291,24 @@ void bidiag_gkl_restart(
     // Step 7
     // MPI_Bcast(&(Q.col(j+1)[0]), Q.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
     // MPI_Bcast(&(Q.col(0)[0]), Q.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    for(size_t aa = 0; aa < Q.dim0(); ++aa)
-      MPI_Bcast(&(Q.col(j+1)[aa]), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    
+    //for(size_t aa = 0; aa < Q.dim0(); ++aa)
+    //  MPI_Bcast(&(Q.col(j+1)[aa]), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    {
+    vec_container<double> bcast_data(Q.dim0());
+    
+    if(rank == 0)
+      for(size_t bc = 0; bc < Q.dim0(); ++bc)
+        bcast_data[bc] = Q.col(j+1)[bc];
+
+    MPI_Bcast(&bcast_data[0], Q.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    
+    if(rank != 0)
+      for(size_t bc = 0; bc < Q.dim0(); ++bc)
+        Q.col(j+1)[bc] = bcast_data[bc];
+    } 
+    q_e = currenttime();
+    std::cout << "bottle nect is" << (q_e - q_s) / 10.0e6 << std::endl;
 
     if (j + 1 < n) {
       if(rank == 0)
@@ -313,11 +335,21 @@ void bidiag_gkl_restart(
 	std::cout << "time of step 7 is : " << (t_end - t_start) / 1.0e6 << std::endl;
       }
 
-      // MPI_Bcast(&(P.col(l)[0]), P.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-      // MPI_Bcast(&(P.col(0)[0]), P.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-      for(size_t aa = 0; aa < P.dim0(); ++aa)
-        MPI_Bcast(&(P.col(j+1)[aa]), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      //for(size_t aa = 0; aa < P.dim0(); ++aa)
+      //  MPI_Bcast(&(P.col(j+1)[aa]), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+      { 
+      vec_container<double> bbcast_data(P.dim0());
 
+      if(rank == 0)
+        for(size_t bc = 0; bc < P.dim0(); ++bc)
+          bbcast_data[bc] = P.col(j+1)[bc];
+
+      MPI_Bcast(&bbcast_data[0], P.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    
+      if(rank != 0)
+        for(size_t bc = 0; bc < P.dim0(); ++bc)
+          P.col(j+1)[bc] = bbcast_data[bc];
+      } 
     }  // end if
   }    // end while
 
@@ -329,7 +361,8 @@ void bidiag_gkl_restart(
     std::cout << "total step 6 time is : " << t_total6 << std::endl;
     std::cout << "total step 7 time is : " << t_total7 << std::endl;
   }
-
+  //q_e = currenttime();
+  //std::cout << " rank is " << rank << "bi tototoal is" << (q_e - q_s) / 1.0e6 << std::endl;
   return ;
 }
 

@@ -1,5 +1,4 @@
 /* run_svd_tr.cpp */
-
 #include "mpi_svd_tr.hpp"
 
 #include <douban/mpi.hpp>
