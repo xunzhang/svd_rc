@@ -77,6 +77,7 @@ template <class CAX, class CATX, class CU, class CS, class CV>
     double ot = 0;
     t_start = current_time();
     while (nconv < nev) {
+      //MPI_Bcast(&(Q.col(0)[0]), n * (k + 1), MPI_DOUBLE, 0, MPI_COMM_WORLD);
       thick_cnt += 1;
       cnt += 1;
       CLOG_IF(display, INFO, "thick " << cnt << "/" << thick_cnt << " locked=" << locked << " l=" << l);
@@ -84,12 +85,15 @@ template <class CAX, class CATX, class CU, class CS, class CV>
       std::cout << vec_lim_str(rho, 5) << std::endl;
       CLOG_IF(display >= 10, INFO, "rho=" << vec_lim_str(rho, 30));
       if (display >= 5) ot = get_drtime();
-      std::cout << "bidiag_gkl_restart start" << std::endl; 
+      std::cout << vec_lim_str(rho, 5) << std::endl;
       t_start_tmp = current_time();
-      std::cout << "l is" << l << "and k is " << k << std::endl;
+      
+      std::cout << "bidiag_gkl_restart start" << std::endl; 
       bidiag_gkl_restart(locked, l, k, Ax, Atx, alpha, beta, rho, P, Q, s_indx, t_s_indx);
-      t_end_tmp = current_time();
       std::cout << "bidiag_gkl_restart end" << std::endl; 
+      
+      t_end_tmp = current_time();
+      std::cout << vec_lim_str(rho, 5) << std::endl;
       if (rank == 0)
         std::cout << "bidiag_glk_restart time is " << (t_end_tmp - t_start_tmp) / 1.0e6 << std::endl;
       CLOG_IF(display >= 5, INFO, "bidiag gkl restart using " << (get_drtime() - ot) << " seconds");
@@ -124,6 +128,7 @@ template <class CAX, class CATX, class CU, class CS, class CV>
       CLOG_IF(display >= 10, INFO, "done svd_ge");
       make_vec(rho_buf + locked, k - locked) = beta[k - 1] * BU.row(k - locked - 1);
       int o_nconv = nconv, n_nconv = locked;
+      CLOG_IF(display >= 10, INFO, "rho=" << vec_lim_str(rho, 30));
       while (n_nconv < k) {
         if (std::abs(rho[n_nconv]) > eps * s_buf[0]) break;
           n_nconv ++;
@@ -134,7 +139,7 @@ template <class CAX, class CATX, class CU, class CS, class CV>
           if (l == n_nconv) l = k;
         }
         if (display >= 5) ot = get_drtime();
-        if(rank == 0) {
+        //if(rank == 0) {
 #pragma omp parallel sections
           {
 #pragma omp section
@@ -154,10 +159,17 @@ template <class CAX, class CATX, class CU, class CS, class CV>
               }
 	    }
           }
-        }
+        //}
         MPI_Bcast(&l, 1, MPI_INT, 0, MPI_COMM_WORLD);
         MPI_Bcast(&locked, 1, MPI_INT, 0, MPI_COMM_WORLD);
         MPI_Bcast(&k, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	/*
+	if(rank == 0) {
+	  for(size_t bc = 0; bc < Q.col(k).size(); ++bc)
+	    std::cout << "Q.col(k) val is " << Q.col(k)[bc] << std::endl;
+	  std::cout << "babarrier" << std::endl;
+	}
+	*/
         Q.col(l).assign(Q.col(k));
         CLOG_IF(display >= 5, INFO, "updated P and Q in " << (get_drtime() - ot) << " seconds");
         nconv = n_nconv;
@@ -170,7 +182,7 @@ template <class CAX, class CATX, class CU, class CS, class CV>
           throw std::runtime_error("thick restart with cnt over limit ..."); 
         }
         locked = nconv;
-      }
+      } // end of while
       t_end = current_time();
       std::cout << "main while loop time is " << (t_end - t_start) / 1.0e6 << std::endl;
       S = make_vec(s_buf, S.size());

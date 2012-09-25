@@ -17,7 +17,7 @@
 #include <sys/time.h>
 
 static double currenttime(void) {
-  double timestamp;
+double timestamp;
   struct timeval tv;
   gettimeofday(&tv, 0);
   timestamp = (double)((double)(tv.tv_sec*1e6) + (double)tv.tv_usec);
@@ -27,106 +27,53 @@ static double currenttime(void) {
 namespace douban {
 namespace linalg {
 
-/*
 template <class CM, class CRecv>
 void local_union(CM && mat, CRecv && recv_tmp, int indx, int nprocs) {
-  for(size_t i = 0; i < mat.dim0(); ++i)
-    for(size_t j = 1; j < (size_t)nprocs; ++j)
-      recv_tmp.get(i) += recv_tmp.get(j * mat.dim0() + i);
-  for(size_t i = 0; i < mat.dim0(); ++i)
-    mat.col(indx).get(i) = recv_tmp.get(i);
-}
-*/
-
-template <class CM, class CRecv>
-void local_union(CM && mat, CRecv && recv_tmp, int indx, int nprocs) {
-  for(size_t i = 0; i < mat.dim0(); ++i)
-    //mat.col(indx)[i] = 0;
+  for(size_t i = 0; i < mat.dim0(); ++i) {
+    mat.col(indx)[i] = 0;
     for(size_t j = 0; j < (size_t)nprocs; ++j)
-      mat.col(indx)[i] += recv_tmp.get(j * mat.dim0() + i);
-}
-
-/*
-template<class CM, class CV, class CR>
-void parallel_gemv_task(CM && mat, CV && vec, CR && res) {
-  int rank, nprocs;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
-  double l_start, l_end;
-
-  int m = (int)mat.dim0();// n = (int)mat.dim1();
-  int load = m / nprocs;
-  int remainder = m % nprocs;
-  int max_load = load + remainder;
-  int *rcounts = new int [nprocs];
-  int *displs = new int [nprocs];
-
-  // add include file??!!
-  mat_container<double> pA(max_load, n);
-  vec_container<double> y_tmp(max_load);
-
-  l_start = currenttime();
-  // copy value of mat by each procs
-  for(int i = 0; i < load; ++i)
-    for(int j = 0; j < n; ++j)
-      pA.get(i, j) = mat.get(i + rank * load, j);
-  if(remainder != 0 && rank == nprocs - 1)
-    for(int i = load; i < max_load; ++i)
-      for(int j = 0; j < n; ++j)
-        pA.get(i, j) = mat.get(i + rank * load, j);
-  l_end = currenttime();
-  std::cout << "prapare in step 4 cost time is : " << (l_end - l_start) / 1.0e6 << std::endl;
-
-  l_start = currenttime();
-  // General matrix vector multiplication
-  y_tmp = gemv(pA, vec);
-  l_end = currenttime();
-  std::cout << "pA.dim0 is " << pA.dim0() << std::endl;
-  std::cout << "pA.dim1 is " << pA.dim1() << std::endl;
-  std::cout << "mv in step 4 cost time is : " << (l_end - l_start) / 1.0e6 << std::endl;
-
-  // Prepare for MPI_Gatherv
-  for(int i = 0; i < nprocs; ++i) {
-    rcounts[i] = load;
-    displs[i] = i * load;
+      mat.col(indx)[i] += recv_tmp[j * mat.dim0() + i];
+      //std::cout << "mat.col value is " << mat.col(indx)[i] << std::endl;
   }
-  if(remainder != 0)
-    rcounts[nprocs - 1] = max_load;
-  if(rank == nprocs - 1)
-    load = max_load;
-
-  // MPI_Gatherv
-  MPI_Gatherv(&y_tmp[0], load, MPI_DOUBLE, &res[0], &rcounts[0], &displs[0], MPI_DOUBLE, 0, MPI_COMM_WORLD);
-  l_start = currenttime();
-  std::cout << "gatherv in step 4 cost time is : " << (l_start - l_end) / 1.0e6 << std::endl;
-
-  delete [] rcounts;
-  deaete [] displs;
-
-  return;
 }
-*/
+
 
 template<class CM, class CV, class CR>
 void parallel_gemv_task(CM && mat, CV && vec, CR && res) {
   int rank, nprocs;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
-
+   
   int m = (int)mat.dim0();// n = (int)mat.dim1();
+  
+  if(m < nprocs) {
+    vec_container<double> tmp_y(m);
+    tmp_y = 0;
+    tmp_y = gemv(mat, vec); 
+    res = 0;
+    MPI_Allreduce(&tmp_y[0], &res[0], m, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    return ;
+  } 
+  
+  vec_container<double> ttmp(vec.size(), 0);
+  ttmp = vec;
+  MPI_Allreduce(&ttmp[0], &vec[0], vec.size(), MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    
   int load = m / nprocs;
+   
   int remainder = m % nprocs;
   int max_load = load + remainder;
   int *rcounts = new int [nprocs];
   int *displs = new int [nprocs];
   int offset;
   offset = rank * load;
-
-  douban::vec_container<double> y_tmp(max_load);
-
+  
+  douban::vec_container<double> y_tmp(max_load, 0);
+   
   // General matrix vector multiplication
+  
   y_tmp = douban::gemv(mat_rows(mat, offset, offset + max_load), vec);
-
+  
   // Prepare for MPI_Gatherv
   for(int i = 0; i < nprocs; ++i) {
     rcounts[i] = load;
@@ -136,232 +83,215 @@ void parallel_gemv_task(CM && mat, CV && vec, CR && res) {
     rcounts[nprocs - 1] = max_load;
   if(rank == nprocs - 1)
     load = max_load;
-
+  
   // MPI_Gatherv
   MPI_Gatherv(&y_tmp[0], load, MPI_DOUBLE, &res[0], &rcounts[0], &displs[0], MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
+  
+  MPI_Bcast(&res[0], res.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+  
   delete [] rcounts;
   delete [] displs;
-
   return;
 }
 
-template <class CAX, class CATX, class CD, class CE, class CRho, class CP, class CQ>
-void bidiag_gkl_restart(
-    int locked, int l, int n,
-    CAX && Ax, CATX && Atx, CD && D, CE && E, CRho && rho, CP && P, CQ && Q, int s_indx, int t_s_indx) {
-
-  // enhancements version from SLEPc
-  const double eta = 1.e-10;
-  
-  double q_s = 0.0, q_e = 0.0;
-
-  double t_start = 0.0, t_end = 0.0;
-  double local_start = 0.0, local_end = 0.0;
-  double t_total3 = 0.0, t_total4 = 0.0, t_total5 = 0.0, t_total6 = 0.0, t_total7 = 0.0;
-
-  int rank, nprocs;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
-
-  // Step 1
-  int recv_len = (int)P.dim0() * nprocs;
-  vec_container<double> tmp(Ax.dim0());
-  vec_container<double> recv_tmp(recv_len);
-  
-  auto m_Ax = make_gemv_ax(&Ax);
-  auto m_Atx = make_gemv_ax(&Atx);
-  
-  m_Ax(Q.col(l), tmp, P.dim0() > 1000);
-  
-  vec_container<double> send_data(P.dim0(),0);
-  for(size_t i = s_indx; i < s_indx + Ax.dim0(); ++i)
-    send_data[i] = tmp[i-s_indx];
-  
-  MPI_Gather(&(send_data[0]), P.dim0(), MPI_DOUBLE, &(recv_tmp[0]), P.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-  
-  P.col(l) = 0;
-  // Generate truly P.col(l)
-  if(rank == 0) {
-    local_union(P, recv_tmp, l, nprocs);
-    // Step 2 & also in rank 0
-    for (int j = locked; j < l; ++j) {
-      P.col(l) += -rho(j) * P.col(j);
-    }
-  }
-
-  MPI_Bcast(&(P.col(0)[0]), P.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-  //MPI_Bcast(&(P.col(l)[0]), P.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-  // Main loop
-  vec_container<double> T(n);
-  int recv_l = Q.dim0() * nprocs;
-  vec_container<double> recv_t(recv_l);
-  //q_s = currenttime();
-  std::cout << "l is " << l << "n is " << n << std::endl;
-  for (int j = l; j < n; ++j) {
-    q_s = currenttime();
-    std::cout << "main loop" << std::endl;
-    // Step 3
-    vec_container<double> tmp2(Atx.dim0());
-
-    /* for print */
-    if(rank == 0)
-    	t_start = currenttime();
-
-    local_start = currenttime();
-    m_Atx(P.col(j), tmp2, Q.dim0() > 1000);
-    local_end = currenttime();
-    std::cout << "parallel mv time cost is " << (local_end - local_start) / 1.0e6 << std::endl;
-
-    vec_container<double> s_data(Q.dim0(), 0);
-    for(size_t i = t_s_indx; i < t_s_indx + Atx.dim0(); ++i)
-      s_data[i] = tmp2[i-t_s_indx];
-    MPI_Gather(&(s_data[0]), Q.dim0(), MPI_DOUBLE, &(recv_t[0]), Q.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    local_start = currenttime();
-    std::cout << "parallel mv time cost2 is " << (local_start - local_end) / 1.0e6 << std::endl;
-
-    //Q.col(j+1) = 0;
-    if(rank == 0) {
-      // Generate truly Q.col(j+1)
-      local_union(Q, recv_t, j + 1, nprocs);
-      local_end = currenttime();
-      t_end = currenttime();
-      std::cout << "parallel mv time cost3 is " << (local_end - local_start) / 1.0e6 << std::endl;
-      std::cout << "time of step 3 is : " << (t_end - t_start) / 1.0e6 << std::endl;
-      t_total3 += (t_end - t_start) / 1.0e6;
-    }
-
-    // Step 4
-    { // begin of local scope
-    //for(size_t aa = 0; aa < Q.dim0(); ++aa) // row
-    //  MPI_Bcast(&(Q.row(aa)[0]), j + 2, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    vec_container<double> cast_data(Q.dim0() * (j + 2));
-    for(size_t bc = 0; bc < Q.dim0() * (j + 2); ++bc) {
-      cast_data[]
-    }
-    } // end of local scope
+template<class CAX, class CATX, class CD, class CE, class CRho, class CP, class CQ>
+void bidiag_gkl_restart(int locked, int l, int n,
+     			CAX && Ax, CATX && Atx, CD && D, CE && E, CRho && rho, CP && P, CQ && Q, int s_indx, int t_s_indx) {
     
-    if(rank == 0)
-      t_end = currenttime();
-    auto Qj = mat_cols(Q, 0, j + 1);
-    auto Tj = make_vec(&T, j + 1);
+    // enhancements version from SLEPC
+    int rank, nprocs;
+    const double eta = 1.e-10;
+    int debug_count = 0; 
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 
-    //Tj.assign(gemv(Qj.trans(), Q.col(j + 1)), j >= 3);
-    parallel_gemv_task(Qj.trans(), Q.col(j+1), Tj);
+    auto m_Ax = make_gemv_ax(&Ax);
+    auto m_Atx = make_gemv_ax(&Atx);
+    
+    // step 1
+    vec_container<double> temp(Ax.dim0(), 0);
+    vec_container<double> send_data(P.dim0(), 0); 
+    vec_container<double> recv_tmp((int)P.dim0() * nprocs);
+    double time1 = 0.0, time2 = 0.0; 
+    time1 = currenttime();
+    m_Ax(Q.col(l), temp, P.dim0() > 1000);
+    time2 = currenttime();
+    std::cout << "matrix vector mul time is " << (time2 - time1) / 1.0e6 << std::endl;
 
+    for(size_t i = s_indx; i < s_indx + Ax.dim0(); ++i)
+      send_data[i] = temp[i - s_indx];
+    MPI_Gather(&send_data[0], P.dim0(), MPI_DOUBLE, &recv_tmp[0], P.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    //P.col(0) = 0;
     if(rank == 0) {
-      t_start = currenttime();
-      t_total4 += (t_start - t_end) / 1.0e6;
-      std::cout << "time of step 4 is : " << (t_start - t_end) / 1.0e6 << std::endl;
+      local_union(P, recv_tmp, l, nprocs);
+      // step 2
+      for(int j = locked; j < l; ++j)
+        P.col(l) += -rho(j) * P.col(j);
     }
+    // to be modified!!
+    MPI_Bcast(&(P.col(0)[0]), P.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+     
+    vec_container<double> T(n, 0);
+    
+    for (int j = l; j < n; ++j) {
+      debug_count ++;
+      vec_container<double> tmp0(Atx.dim0(), 0); // n1, n2 
+      vec_container<double> tmp(Q.dim0(), 0); // n
+      // step 3
+      tmp0 = 0;
+      m_Atx(P.col(j), tmp0, Q.dim0() > 1000);
+       
+      // everything is OK in loop2!!
+      tmp = 0;
+      for(size_t bc = t_s_indx; bc < t_s_indx + Atx.dim0(); ++bc)
+        tmp[bc] = tmp0[bc - t_s_indx];
+       
+      // step 4
+      auto Qj = mat_cols(Q, 0, j + 1);
+      auto Tj = make_vec(&T, j + 1);
+        
+      Tj = 0;
+      
+      parallel_gemv_task(Qj.trans(), tmp, Tj);
+      
+      /*
+      if(rank == 0) {
+        for(size_t bc = 0; bc < Tj.size(); ++bc)
+          std::cout << "Tj " << Tj[bc] << std::endl;
+        std::cout << "barrier" << std::endl;
+      }
+      */
 
-    // Step 5
-    if(rank == 0) {
-      double r = Q.col(j + 1).norm2();
+      for(size_t bc = t_s_indx; bc < t_s_indx + Atx.dim0(); ++bc)
+        tmp0[bc - t_s_indx] = tmp[bc]; 
+       
+      // step 5 
+      // everything is OK in loop2, tmp0!!!
+      double r = tmp0.norm2(); 
+      //std::cout << "first r is " << r * r << std::endl;
+      // everything is OK in loop2, first r is!!!
+      double power_r = 0.0;
+      power_r = r * r;
       D[j] = vec_unit(P.col(j));
-      Q.col(j + 1).scale(1. / D[j]);
+      tmp0.scale(1. / D[j]); 
+      //std::cout << "D[j] is " << D[j] << std::endl;
+      
       Tj = Tj / D[j];
       r /= D[j];
-      Q.col(j + 1).plus_assign(- gemv(Qj, Tj), Q.dim0() > 1000);
+      power_r /= D[j] * D[j];
+      double reduce_r = 0.0;
+      MPI_Allreduce(&power_r, &reduce_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+      // everything is OK in loop2, reduce r is!!!
 
-      t_end = currenttime();
-      t_total5 += (t_end - t_start) / 1.0e6;
-      std::cout << "time of step 5 is : " << (t_end - t_start) / 1.0e6 << std::endl;
-
-      // Step 6
-      double beta = r * r - Tj.square_sum();
-      if (beta < eta * r * r) {
-        Tj.assign(gemv(Qj.trans(), Q.col(j + 1)), Q.dim0() > 1000);
-        r = Q.col(j + 1).square_sum();
-        Q.col(j + 1).plus_assign(-gemv(Qj, Tj), Q.dim0() > 1000);
-        beta = r * r - Tj.square_sum();
+      for(size_t bc = t_s_indx; bc < t_s_indx + Atx.dim0(); ++bc)
+        tmp[bc] = tmp0[bc - t_s_indx];
+      tmp.plus_assign(- gemv(Qj, Tj), Q.dim0() > 1000);
+      for(size_t bc = t_s_indx; bc < t_s_indx + Atx.dim0(); ++bc)
+        tmp0[bc - t_s_indx] = tmp[bc]; 
+      
+      double local_r, local_square_sum;
+      double reduce_square_sum;
+      local_square_sum = Tj.square_sum();
+      //std::cout << "reduce_r is " << reduce_r << std::endl;
+      //std::cout << "rank " << rank << " local_square_sum is " << local_square_sum << std::endl;
+      reduce_square_sum = 0.0;
+      double beta;
+      beta = reduce_r - local_square_sum;
+      //std::cout << "first beta is " << beta << std::endl;
+      
+      // step 6
+      /*
+      {
+      if(beta < eta * reduce_r) {
+        for(size_t bc = t_s_indx; bc < t_s_indx + Atx.dim0(); ++bc)
+          tmp[bc] = tmp0[bc - t_s_indx];
+        parallel_gemv_task(Qj.trans(), tmp, Tj);
+        for(size_t bc = t_s_indx; bc < t_s_indx + Atx.dim0(); ++bc)
+          tmp0[bc - t_s_indx] = tmp[bc];
+        r = tmp0.square_sum();
+        for(size_t bc = t_s_indx; bc < t_s_indx + Atx.dim0(); ++bc)
+          tmp[bc] = tmp0[bc - t_s_indx];
+        tmp.plus_assign(-gemv(Qj, Tj), Q.dim0() > 1000);
+        for(size_t bc = t_s_indx; bc < t_s_indx + Atx.dim0(); ++bc)
+          tmp0[bc - t_s_indx] = tmp[bc];
+        local_r = r * r;
+        local_square_sum = Tj.square_sum();
+        MPI_Allreduce(&local_r, &reduce_r, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        beta = reduce_r - local_square_sum;
+        std::cout << "in step 6 reduce_r is " << reduce_r << std::endl;
+        std::cout << "in step 6 local_square_sum is " << local_square_sum << std::endl;
+      } // end of if
       }
+      */
+
+      //std::cout << "last beta is " << beta << std::endl;
       beta = std::sqrt(beta);
-      E[j] = beta;
-      Q.col(j + 1).scale(1. / E[j]);
-
-      t_start = currenttime();
-      t_total6 += (t_start - t_end) / 1.0e6;
-      std::cout << "time of step 6 is : " << (t_start - t_end) / 1.0e6 << std::endl;
-    }
-
-    // Step 7
-    // MPI_Bcast(&(Q.col(j+1)[0]), Q.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    // MPI_Bcast(&(Q.col(0)[0]), Q.size(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    
-    //for(size_t aa = 0; aa < Q.dim0(); ++aa)
-    //  MPI_Bcast(&(Q.col(j+1)[aa]), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    {
-    vec_container<double> bcast_data(Q.dim0());
-    
-    if(rank == 0)
-      for(size_t bc = 0; bc < Q.dim0(); ++bc)
-        bcast_data[bc] = Q.col(j+1)[bc];
-
-    MPI_Bcast(&bcast_data[0], Q.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    
-    if(rank != 0)
-      for(size_t bc = 0; bc < Q.dim0(); ++bc)
-        Q.col(j+1)[bc] = bcast_data[bc];
-    } 
-    q_e = currenttime();
-    std::cout << "bottle nect is" << (q_e - q_s) / 10.0e6 << std::endl;
-
-    if (j + 1 < n) {
+      //std::cout << "last beta is " << beta << std::endl;
+      E[j] = beta; 
+      tmp0.scale(1. / E[j]); // end of step 6	
+      //std::cout << "2check beta is " << beta << "and reduce )_r is " << reduce_r << std::endl;
+      
+      //std::cout << "debug here 1" << std::endl; 
+      
+      { // local scope, allreduce Q.col(j+1)
+      vec_container<double> recv_t((int)Q.dim0() * nprocs, 0);
+	
+      tmp = 0;
+      for(size_t bc = t_s_indx; bc < t_s_indx + Atx.dim0(); ++bc) 
+	tmp[bc] = tmp0[bc - t_s_indx];
+      
+      MPI_Gather(&tmp[0], Q.dim0(), MPI_DOUBLE, &recv_t[0], Q.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	
+      if(rank == 0) local_union(Q, recv_t, j + 1, nprocs);
+        
+      vec_container<double> bcast_data(Q.dim0());
       if(rank == 0)
-        t_start = currenttime();
-      vec_container<double> tmp3(Ax.dim0());
-      vec_container<double> se_data(P.dim0(), 0);
-
-      m_Ax(Q.col(j + 1), tmp3, P.dim0() > 1000);
-
-      for(size_t k1 = s_indx; k1 < s_indx + Ax.dim0(); ++k1)
-        se_data[k1] = tmp3[k1-s_indx];
-      MPI_Gather(&se_data[0], P.dim0(), MPI_DOUBLE, &recv_tmp[0], P.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-
-      // P.col(j+1) = 0;
-      if(rank == 0) {
-	local_union(P, recv_tmp, j + 1, nprocs);
-	P.col(j + 1).plus_assign(- E[j] * P.col(j), P.dim0() > 1000);
-      }
-
-      /* for print */
-      if(rank == 0) {
-        t_end = currenttime();
-        t_total7 += (t_end - t_start) / 1.0e6;
-	std::cout << "time of step 7 is : " << (t_end - t_start) / 1.0e6 << std::endl;
-      }
-
-      //for(size_t aa = 0; aa < P.dim0(); ++aa)
-      //  MPI_Bcast(&(P.col(j+1)[aa]), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-      { 
-      vec_container<double> bbcast_data(P.dim0());
-
-      if(rank == 0)
-        for(size_t bc = 0; bc < P.dim0(); ++bc)
-          bbcast_data[bc] = P.col(j+1)[bc];
-
-      MPI_Bcast(&bbcast_data[0], P.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    
+        for(size_t bc = 0; bc < Q.dim0(); ++bc)
+          bcast_data[bc] = Q.col(j + 1)[bc];
+      MPI_Bcast(&bcast_data[0], Q.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
       if(rank != 0)
-        for(size_t bc = 0; bc < P.dim0(); ++bc)
-          P.col(j+1)[bc] = bbcast_data[bc];
-      } 
-    }  // end if
-  }    // end while
+        for(size_t bc = 0; bc < Q.dim0(); ++bc)
+          Q.col(j + 1)[bc] = bcast_data[bc];
+      } // end of local scope
+        
+      // step 7
+      if(j + 1 < n) {
 
-  /* for print time of each step. */
-  if(rank == 0) {
-    std::cout << "total step 3 time is : " << t_total3 << std::endl;
-    std::cout << "total step 4 time is : " << t_total4 << std::endl;
-    std::cout << "total step 5 time is : " << t_total5 << std::endl;
-    std::cout << "total step 6 time is : " << t_total6 << std::endl;
-    std::cout << "total step 7 time is : " << t_total7 << std::endl;
-  }
-  //q_e = currenttime();
-  //std::cout << " rank is " << rank << "bi tototoal is" << (q_e - q_s) / 1.0e6 << std::endl;
-  return ;
+	// every thing is OK above Q(j+1)!!!!!
+	vec_container<double> tmp1(P.dim0(), 0);
+        vec_container<double> tmp2(Ax.dim0(), 0);
+	m_Ax(Q.col(j + 1), tmp2, P.dim0() > 1000);
+
+	// every thing is OK above tmp2!!!!!
+	for(size_t bc = s_indx; bc < s_indx + Ax.dim0(); ++bc) 
+	  tmp1[bc] = tmp2[bc - s_indx];
+	tmp1.plus_assign(-E[j] * P.col(j), P.dim0() > 1000);
+        
+	for(size_t bc = 0; bc < tmp1.size(); ++bc)
+	  if((int)bc < s_indx || (int)bc >= (s_indx + (int)Ax.dim0()))
+	    tmp1[bc] = 0;
+        
+        // every thing is OK above tmp1!!!	
+        { // local scope, allreduce P.col(j+1)
+        vec_container<double> recv_d((int)P.dim0() * nprocs);
+	MPI_Gather(&tmp1[0], P.dim0(), MPI_DOUBLE, &recv_d[0], P.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        if(rank == 0) local_union(P, recv_d, j + 1, nprocs);
+        
+        // every thing is OK above P(j+1)!!!
+	vec_container<double> bbcast_data(P.dim0(), 0);
+        if(rank == 0)
+          for(size_t bc = 0; bc < P.dim0(); ++bc)
+            bbcast_data[bc] = P.col(j + 1)[bc];
+        MPI_Bcast(&bbcast_data[0], P.dim0(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        if(rank != 0)
+          for(size_t bc = 0; bc < P.dim0(); ++bc)
+            P.col(j + 1)[bc] = bbcast_data[bc];
+      
+        } // end of local scope
+         
+      } // end of if
+
+    } // end of main loop 
 }
 
 template <class CA, class CD, class CE, class CRho, class CP, class CQ>
